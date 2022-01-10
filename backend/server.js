@@ -1,12 +1,33 @@
-import express from 'express'
+import express, { json } from 'express'
 import cors from 'cors'
 import mongoose from 'mongoose'
+import crypto from 'crypto'
+import bcrypt from 'bcrypt'
 
-const mongoUrl = process.env.MONGO_URL || "mongodb://localhost/authAPI"
+const mongoUrl = process.env.MONGO_URL || 'mongodb://localhost/authAPI'
 mongoose.connect(mongoUrl, { useNewUrlParser: true, useUnifiedTopology: true })
 mongoose.Promise = Promise
 
-// Defines the port the app will run on. Defaults to 8080, but can be 
+const UserSchema = new mongoose.Schema({
+  username: {
+    type: String,
+    unique: true,
+    required: true,
+  },
+
+  password: {
+    type: String,
+    required: true,
+  },
+  accessToken: {
+    type: String,
+    default: () => crypto.randomBytes(128).toString('hex'),
+  },
+})
+
+const User = mongoose.model('User', UserSchema)
+
+// Defines the port the app will run on. Defaults to 8080, but can be
 // overridden when starting the server. For example:
 //
 //   PORT=9000 npm start
@@ -17,9 +38,76 @@ const app = express()
 app.use(cors())
 app.use(express.json())
 
+const autenticateUser = async (req, res, next) => {
+  const accessToken = req.header('Authorization')
+
+  try {
+    const user = await User.findOne({ accessToken })
+    if (user) {
+      next()
+    } else {
+      res.status(404).json({ response: 'Please log in', success: false })
+    }
+  } catch (error) {
+    res.status(404).json({ response: error, success: false })
+  }
+}
+
 // Start defining your routes here
 app.get('/', (req, res) => {
   res.send('Hello world')
+})
+
+app.post('/signup', async (req, res) => {
+  const { username, password } = req.body
+
+  try {
+    const salt = bcrypt.genSaltSync()
+
+    if (password.length < 5) {
+      throw 'Password must be at least 5 characters long'
+      //Execute abortion of try and go to catch
+    } else {
+    }
+
+    const newUser = await new User({
+      username,
+      password: bcrypt.hashSync(password, salt),
+    }).save()
+
+    res.status(201).json({
+      response: {
+        userId: newUser._id,
+        username: newUser.username,
+        accessToken: newUser.accessToken,
+      },
+      success: true,
+    })
+  } catch (error) {
+    res.status(400).json({ response: error, success: false })
+  }
+})
+
+app.post('/signin', async (req, res) => {
+  const { username, password } = req.body
+
+  try {
+    const user = await User.findOne({ username })
+
+    if (user && bcrypt.compareSync(password, user.password)) {
+      res.status(200).json({
+        response: {
+          userId: user._id,
+          username: user.username,
+          accessToken: user.accessToken,
+        },
+      })
+    } else {
+      res
+        .status(404)
+        .json({ response: "user or password doesn't exist", success: false })
+    }
+  } catch {}
 })
 
 // Start the server
